@@ -2,15 +2,69 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#192821;color:ivory;font:600 16px system-ui;overflow:hidden;touch-action:none;user-select:none}canvas{display:block;width:100vw;height:100vh;height:100dvh}header,footer,#dashboard,#gear{position:fixed}header{top:max(14px,env(safe-area-inset-top));left:18px;text-shadow:0 2px 6px #19251c}small{display:block;letter-spacing:.18em;font-size:10px}h1{margin:0;font:italic 900 clamp(22px,4vw,40px) system-ui;letter-spacing:-.07em}em{color:#ffba58}button,select{border:1px solid #faf5df65;color:ivory;background:#16241fe8;border-radius:12px;padding:12px;font:700 15px system-ui;touch-action:none}button:active,.on{background:#ab611d}#gear{top:15px;right:15px}footer{bottom:max(14px,env(safe-area-inset-bottom));inset-inline:14px;display:flex;justify-content:space-between;align-items:end}footer button{min-width:52px;height:62px;font-size:20px}#gas{background:#ffb554;color:#28211b}#dashboard{bottom:90px;left:16px;background:#18241ed9;padding:8px 12px;border-left:3px solid #ffb554;border-radius:4px;font-size:13px}dialog{background:#203229;color:ivory;border:1px solid #748275;border-radius:16px;max-width:min(400px,92vw);max-height:88dvh;padding:22px}dialog::backdrop{background:#0d1916a8}dialog h2{margin:4px 0}dialog p{line-height:1.5}label,select{display:block;margin:8px 0}dialog button{margin:4px}#target{font-weight:600;font-size:13px} 
 </style><canvas id="view"></canvas><header><small>PINE HOLLOW OFF-ROAD PARK</small><h1>MUDMASTER <em>2</em></h1><span id="target"></span></header><button id="gear">Garage ☰</button><div id="dashboard"></div><footer><div><button data-key="left" aria-label="Steer left">◀</button> <button data-key="right" aria-label="Steer right">▶</button></div><div><button data-key="brake">Brake / R</button> <button id="gas" data-key="gas">Gas</button></div></footer>
-<dialog id="garage"><small>PINE HOLLOW</small><h2>Trail garage</h2><p>Explore the hollow and collect the orange trail flags. The arrow points to the nearest undiscovered flag. Hold Brake / R to back up.</p><label for="rig">Choose your rig</label><select id="rig"><option>Copperhead pickup</option><option>Mossback crawler</option><option>Bluebird rally truck</option></select><button id="range">Low range OFF</button><button id="recover">Return to camp</button><button id="drive">Drive ▸</button></dialog>
+<dialog id="garage"><small>PINE HOLLOW</small><h2>Trail garage</h2><p>Follow the paved town loop for faster driving. Pull off beside the blue parking signs and stop inside an open garage.</p><p>Explore the hollow and collect the orange trail flags. The arrow points to the nearest undiscovered flag. Hold Brake / R to back up.</p><label for="rig">Choose your rig</label><select id="rig"><option>Copperhead pickup</option><option>Mossback crawler</option><option>Bluebird rally truck</option></select><button id="range">Low range OFF</button><button id="recover">Return to camp</button><button id="drive">Drive ▸</button></dialog>
 <script>
 'use strict';
 const $=id=>document.getElementById(id),c=$('view'),g=c.getContext('2d'),keys={},flags=[[0,95,'Creek crossing'],[103,185,'Pine ridge'],[-112,220,'North lookout'],[-164,42,'Beaver bend'],[116,-114,'Clay pit'],[-72,-145,'South camp']];
 let save={};try{save=JSON.parse(localStorage.mudmaster2||'{}')||{}}catch{}
 let found=new Set(Array.isArray(save.flags)?save.flags:[]),rig=Math.min(2,Math.max(0,Number(save.rig)||0)),low=false,x=0,z=0,a=0,v=0,t=0,lean=0,w,h,F,ca,sa,cx,cz,cy,faces=[],last=0,clock=0;
 const sin=Math.sin,cos=Math.cos,clamp=(n,l,r)=>Math.max(l,Math.min(r,n)), creek=X=>74+18*sin(X*.027),trail=Z=>20*sin(Z*.018);
-function surface(X,Z){if(Math.abs(Z-creek(X))<7)return 2;if(Math.abs(X-trail(Z))<11||Math.hypot(X-116,Z+114)<36)return 1;return 0}
-function height(X,Z){return 2.7*sin(X*.048)*cos(Z*.03)+2*sin(Z*.055)+5*sin(X*.018+Z*.021)-3*Math.exp(-Math.pow((Z-creek(X))/11,2))}
+// Two straight streets joined by semicircular bends.
+const radius=36, straight=96, bend=Math.PI*radius, circuit=2*(straight+bend);
+function roadDistance(X,Z){return Math.abs(Math.hypot(X-36,Math.max(0,Math.abs(Z)-48))-radius)}
+function lane(distance,offset=0){
+ let d=((distance%circuit)+circuit)%circuit,X,Z,heading;
+ if(d<straight){X=0;Z=-48+d;heading=0}
+ else if((d-=straight)<bend){let q=d/radius;X=36-radius*cos(q);Z=48+radius*sin(q);heading=q}
+ else if((d-=bend)<straight){X=72;Z=48-d;heading=Math.PI}
+ else{let q=(d-straight)/radius;X=36+radius*cos(q);Z=-48-radius*sin(q);heading=Math.PI+q}
+ return [X+offset*cos(heading),Z-offset*sin(heading),heading]
+}
+const lots=[
+ {x:-19,z:25,bay:true,color:'#587f80'},{x:20,z:-24,bay:true,color:'#975c40'},
+ {x:-20,z:-14,color:'#bb935e'},{x:20,z:30,color:'#9a624c'},
+ {x:92,z:21,color:'#869a83'},{x:92,z:-8,color:'#ac8259'},
+ {x:52,z:5,color:'#b7a084'}];
+function localLot(l,X,Z){let side=l.x<0||l.x===52?-1:1;return [(X-l.x)*side,Z-l.z]}
+function blocked(X,Z){return lots.some(l=>{let [f,u]=localLot(l,X,Z);return Math.abs(u)<7.4&&Math.abs(f)<7.4&&(!l.bay||Math.abs(u)>4.45||f>4.5)})}
+function parked(){return Math.abs(v)<.65&&lots.some(l=>l.bay&&Math.abs(x-l.x)<4&&Math.abs(z-l.z)<4)}
+const traffic=[['#d8a342',7,13],['#548294',-8,106],['#af5941',6,183],['#84996c',-7,305]];
+function carPosition(car){let [X,Z,A]=lane(car[2]+car[1]*t,car[1]>0?3:-3);return [X,Z,A+(car[1]<0?Math.PI:0)]}
+function surface(X,Z){if(roadDistance(X,Z)<6)return 3;if(Math.abs(Z-creek(X))<7)return 2;if(Math.abs(X-trail(Z))<11||Math.hypot(X-116,Z+114)<36)return 1;return 0}
+function hill(X,Z){return 2.7*sin(X*.048)*cos(Z*.03)+2*sin(Z*.055)+5*sin(X*.018+Z*.021)-3*Math.exp(-Math.pow((Z-creek(X))/11,2))}
+function height(X,Z){
+ let y=hill(X,Z);
+ for(const l of lots){let d=Math.max(Math.abs(X-l.x),Math.abs(Z-l.z));if(d<12)return y+(hill(l.x,l.z)-y)*clamp((12-d)/5,0,1)}
+ return y
+}
+function drawTown(){
+ for(let d=0;d<circuit;d+=5){
+  let end=Math.min(circuit,d+5);
+  function mark(u,v,s,e,col){let corners=[[s,u],[e,u],[e,v],[s,v]].map(([dist,off])=>{let [X,Z]=lane(dist,off);return [X,height(X,Z)+.1,Z]});poly(corners,col)}
+  for(let off=-6;off<6;off+=3)mark(off,off+3,d,end,'#505352');
+  if(d%10===0)mark(-.12,.12,d,Math.min(d+3,end),'#edc87b');
+  for(let off of [-5.7,5.5])mark(off,off+.17,d,end,'#d2d2bd')
+ }
+ for(const l of lots){
+  let Y=height(l.x,l.z),side=l.x<0||l.x===52?-1:1;
+  const P=(u,y,f)=>[l.x+f*side,Y+y,l.z+u];
+  function wall(u1,f1,u2,f2,lo,hi,color){poly([P(u1,lo,f1),P(u2,lo,f2),P(u2,hi,f2),P(u1,hi,f1)],color)}
+  wall(-6,6,6,6,-.2,5,l.color);for(let u of [-6,6])wall(u,-6,u,6,-.2,5,l.color);
+  if(l.bay){wall(-6,-6,6,-6,4.35,5,'#e4dcc3');
+   poly([P(-6,.12,-13),P(6,.12,-13),P(6,.12,6),P(-6,.12,6)],'#999785');
+   wall(-2,-6.05,2,-6.05,4.4,5.5,'#35627a');
+  }else{wall(-6,-6,6,-6,0,5,l.color);wall(-1,-6.1,1,-6.1,0,3.4,'#535348');
+   for(let u of [-4,2])wall(u,-6.12,u+2,-6.12,1.8,3.6,'#a9cbd0')}
+  for(let u of [-6.6,6.6])poly([P(u,5,-6.6),P(0,7,-6.6),P(0,7,6.6),P(u,5,6.6)],u<0?'#58605c':'#454d49');
+  for(let f of [-6,6])poly([P(-6,5,f),P(6,5,f),P(0,7,f)],l.color)
+ }
+ for(const car of traffic){
+  let [X,Z,A]=carPosition(car),Y=height(X,Z),P=(u,y,f)=>[X+cos(A)*u+sin(A)*f,Y+y,Z-sin(A)*u+cos(A)*f];
+  function shell(w,front,rear,lo,hi,side,top){let b=[P(-w,lo,rear),P(w,lo,rear),P(w,lo,front),P(-w,lo,front)],r=b.map(q=>[q[0],q[1]+hi-lo,q[2]]);for(let i=0;i<4;i++)poly([b[i],b[(i+1)%4],r[(i+1)%4],r[i]],side);poly(r,top)}
+  shell(1.04,2,-2,.2,.63,'#303630','#343b37');shell(1.09,2.15,-2.15,.56,1.18,car[0],car[0]);shell(.92,1.1,-1.22,1.18,1.86,'#46606a',car[0]);
+  for(let u of [-.82,.82])for(let f of [-2.17,2.17])poly([P(u-.17,.77,f),P(u+.17,.77,f),P(u+.17,1.01,f),P(u-.17,1.01,f)],f<0?'#e05e49':'#f7e4ad')
+ }
+}
 function persist(){try{localStorage.mudmaster2=JSON.stringify({rig,flags:[...found]})}catch{}}
 function point(X,Y,Z){let dx=X-cx,dz=Z-cz,d=dx*sa+dz*ca;if(d<1)return null;return [w/2+(dx*ca-dz*sa)*F/d,h*.39-(Y-cy)*F/d,d]}
 function poly(vertices,color){let p=vertices.map(q=>point(...q));if(p.some(q=>!q))return;faces.push([p.reduce((s,q)=>s+q[2],0)/p.length,p,color])}
@@ -24,10 +78,11 @@ let gx=Math.floor(cx/6),gz=Math.floor(cz/6);
 for(let i=gx-26;i<=gx+26;i++)for(let j=gz-26;j<=gz+26;j++){
 let X=i*6,Z=j*6,d=(X-cx)*sa+(Z-cz)*ca,side=(X-cx)*ca-(Z-cz)*sa;if(d< -4||d>145||Math.abs(side)>Math.max(d,0)*w/(2*F)+9)continue;
 let s=surface(X+3,Z+3),n=hash(i,j),Y=height(X,Z),shade=Math.round(5*n+(height(X+6,Z)-Y)*2);
-poly([[X,Y,Z],[X+6,height(X+6,Z),Z],[X+6,height(X+6,Z+6),Z+6],[X,height(X,Z+6),Z+6]],'hsl('+[78,30,174][s]+' '+[25,38,24][s]+'% '+([36,30,41][s]+shade)+'%)');
-if(!s&&n>.75&&Math.abs(X-trail(Z))>16&&flags.every(f=>Math.hypot(f[0]-X,f[1]-Z)>9)){
+poly([[X,Y,Z],[X+6,height(X+6,Z),Z],[X+6,height(X+6,Z+6),Z+6],[X,height(X,Z+6),Z+6]],'hsl('+[78,30,174,78][s]+' '+[25,38,24,25][s]+'% '+([36,30,41,36][s]+shade)+'%)');
+if(!s&&roadDistance(X,Z)>8&&lots.every(l=>Math.max(Math.abs(l.x-X),Math.abs(l.z-Z))>13)&&n>.75&&Math.abs(X-trail(Z))>16&&flags.every(f=>Math.hypot(f[0]-X,f[1]-Z)>9)){
 let size=4+6*n,b=(dx,y)=>[X+dx*ca,Y+y,Z-dx*sa];poly([b(-.35,0),b(.35,0),b(.35,3),b(-.35,3)],'#564b36');for(let l=0;l<3;l++){let base=1+l*size*.19,r=size*(.29-.055*l);poly([b(-r,base),b(r,base),b(0,base+size*.57)],['#314c3c','#3c5942','#496649'][l])}}
 }
+drawTown();
 for(let i=0;i<flags.length;i++){let [X,Z]=flags[i],Y=height(X,Z),b=(d,y)=>[X+d*ca,Y+y,Z-d*sa];poly([b(-.12,0),b(.12,0),b(.12,6),b(-.12,6)],'#ede5c9');poly([b(.12,6),b(2.8,5.4),b(.12,4.6)],found.has(i)?'#87b29a':'#ff811e')}
 paint();
 let base=height(x,z),pitch=(height(x+sa*2,z+ca*2)-height(x-sa*2,z-ca*2))*.25,roll=(height(x+ca,z-sa)-height(x-ca,z+sa))*.5+lean;
@@ -36,9 +91,9 @@ let dark=['#252923','#32352f','#42443b'],body=[['#ac5129','#924222','#d97d41'],[
 for(let u of [-1.15,1.15])for(let q of [-1.52,1.52])box(u,.07,q,.66,1.13,1.22,dark);
 box(0,.81,0,2.55,.7,4.85,body);box(0,1.52,.48,2.17,.75,1.94,['#314747','#394e4f','#758687']);box(0,2.24,.49,2.28,.13,2.05,body);box(0,1.52,-1.44,2.1,.05,1.65,dark);for(let u of [-1.14,1.14])box(u,1.5,-1.43,.22,.25,1.85,body);box(0,1.44,-2.34,2.54,.32,.2,body);box(0,.77,-2.49,2.63,.18,.23,dark);for(let u of [-1,1])box(u,1.13,-2.44,.36,.28,.1,['#e34d2c','#9d3320','#ff8752']);paint();
 }
-function tick(ms){let dt=Math.min((ms-last)/1000||0,.05);last=ms;if(!$('garage').open){t+=dt;let s=surface(x,z),turn=Number(!!keys.right)-Number(!!keys.left),gas=Number(!!keys.gas),brake=Number(!!keys.brake),drag=[.28,.68,1.15][s]*(rig===1?.76:1),grade=(height(x+sin(a),z+cos(a))-height(x,z));v+=((gas*(low?11:8)+(gas&&rig===2?1:0))-brake*(v>.25?19:5)-drag*v-grade*4)*dt;if(!gas&&!brake&&Math.abs(v)<.24)v=0;v=clamp(v,-5,low?8:23);a+=turn*clamp(v/5,-1,1)*dt*(rig===1?1.35:1.08);lean+=(turn*v*.005-lean)*Math.min(1,dt*6);x=clamp(x+sin(a)*v*dt,-250,250);z=clamp(z+cos(a)*v*dt,-240,320);
+function tick(ms){let dt=Math.min((ms-last)/1000||0,.05);last=ms;if(!$('garage').open){t+=dt;let s=surface(x,z),turn=Number(!!keys.right)-Number(!!keys.left),gas=Number(!!keys.gas),brake=Number(!!keys.brake),drag=[.36,.68,1.15,.16][s]*(rig===1?.76:1),grade=(height(x+sin(a),z+cos(a))-height(x,z));v+=((gas*(low?11:8)+(gas&&rig===2?1:0))-brake*(v>.25?19:5)-drag*v-grade*4)*dt;if(!gas&&!brake&&Math.abs(v)<.65)v=0;v=clamp(v,-5,low?8:[19,15,10,30][s]);a+=turn*clamp(v/5,-1,1)*dt*(rig===1?1.35:1.08);lean+=(turn*v*.005-lean)*Math.min(1,dt*6);let nx=clamp(x+sin(a)*v*dt,-250,250),nz=clamp(z+cos(a)*v*dt,-240,320);if(blocked(nx,nz)){v=0}else{x=nx;z=nz}
 let near=-1,best=Infinity;flags.forEach(([X,Z],i)=>{if(found.has(i))return;let d=Math.hypot(X-x,Z-z);if(d<6){found.add(i);persist()}else if(d<best){near=i;best=d}});let dir=near<0?0:Math.atan2(flags[near][0]-x,flags[near][1]-z)-a;
-$('target').textContent=near<0?'All flags found · Free roam':(['↑','↗','→','↘','↓','↙','←','↖'][(Math.round(dir/(Math.PI/4))%8+8)%8]+' '+flags[near][2]+' · '+Math.round(best)+' m');$('dashboard').textContent=Math.round(Math.abs(v)*2.237)+' mph  ·  '+['Grass','Mud','Creek'][s]+'  ·  '+(low?'4L':'4H')+'  ·  ⚑ '+found.size+'/6';if(ms-clock>=30){render();clock=ms}}requestAnimationFrame(tick)}
+$('target').textContent=near<0?'All flags found · Free roam':(['↑','↗','→','↘','↓','↙','←','↖'][(Math.round(dir/(Math.PI/4))%8+8)%8]+' '+flags[near][2]+' · '+Math.round(best)+' m');$('dashboard').textContent=Math.round(Math.abs(v)*2.237)+' mph  ·  '+(parked()?'Parked in garage':['Grass','Mud','Creek','Paved road'][s])+'  ·  '+(low?'4L':'4H')+'  ·  ⚑ '+found.size+'/6';if(ms-clock>=30){render();clock=ms}}requestAnimationFrame(tick)}
 for(let b of document.querySelectorAll('[data-key]')){let k=b.dataset.key;b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys[k]=true;b.classList.add('on')};b.onlostpointercapture=()=>{keys[k]=false;b.classList.remove('on')}}
 let mapping={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'gas',ArrowDown:'brake',a:'left',d:'right',w:'gas',s:'brake'};for(let ev of ['keydown','keyup'])window.addEventListener(ev,e=>{if(mapping[e.key]&&!$('garage').open){e.preventDefault();keys[mapping[e.key]]=ev==='keydown'}});
 function clearKeys(){for(let k in keys)keys[k]=false}onblur=clearKeys;document.onvisibilitychange=clearKeys;$('gear').onclick=()=>{clearKeys();$('garage').showModal()};$('drive').onclick=()=>$('garage').close();$('recover').onclick=()=>{x=z=v=a=0;$('garage').close()};$('range').onclick=()=>{low=!low;$('range').textContent='Low range '+(low?'ON':'OFF')};$('rig').selectedIndex=rig;$('rig').onchange=e=>{rig=e.target.selectedIndex;persist()};requestAnimationFrame(tick)
